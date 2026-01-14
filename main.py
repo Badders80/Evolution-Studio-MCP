@@ -4,9 +4,9 @@ Evolution Studio MCP Server
 Bridges Perplexity -> Gemini 2.0 -> Local Resources (ComfyUI, Vault, Models)
 """
 from fastmcp import FastMCP
-import google.generativeai as genai
 import os
 import requests
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -22,13 +22,24 @@ for env_path in vault_env_candidates:
 
 load_dotenv()
 
-# 2. Configure Gemini
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("❌ GEMINI_API_KEY not found in .env file! Please create it.")
+# 2. Configure Gemini (lazy init to keep MCP startup fast)
+_genai_model = None
 
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+def _get_genai_model():
+    global _genai_model
+    if _genai_model is not None:
+        return _genai_model
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("❌ GEMINI_API_KEY not found in .env file! Please create it.")
+
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+    _genai_model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    return _genai_model
 
 # 3. Initialize MCP Server
 mcp = FastMCP("Evolution Studio")
@@ -45,6 +56,7 @@ def generate_image(prompt: str, workflow: str = "flux_default") -> dict:
     """
     try:
         # Step 1: Use Gemini to enhance the user's prompt for better results
+        model = _get_genai_model()
         enhanced_prompt = model.generate_content(
             f"Convert this raw idea into a high-quality Stable Diffusion prompt. Keep it under 200 words. Raw idea: {prompt}"
         ).text
@@ -103,5 +115,6 @@ def gpu_status() -> dict:
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    print("🚀 Evolution Studio MCP is running...")
+    sys.stderr.write("Evolution Studio MCP is running...\n")
+    sys.stderr.flush()
     mcp.run()
