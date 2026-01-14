@@ -11,6 +11,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # 1. Load Environment Variables (API Key)
+# Load central vault keys first, then fall back to local .env
+vault_env_candidates = [
+    Path("/mnt/scratch/vault/central_keys.env"),
+    Path("/mnt/scratch/vault/.gemini_env"),
+]
+for env_path in vault_env_candidates:
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=False)
+
 load_dotenv()
 
 # 2. Configure Gemini
