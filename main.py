@@ -8,6 +8,8 @@ import os
 import requests
 import sys
 from pathlib import Path
+import shutil
+import subprocess
 from dotenv import load_dotenv
 
 # 1. Load Environment Variables (API Key)
@@ -92,10 +94,113 @@ def list_models() -> dict:
     return {"status": "empty", "message": "No GGUF models found in /mnt/scratch/models/GGUF"}
 
 @mcp.tool()
+def list_workflows() -> dict:
+    """List ComfyUI workflow JSON files from known workflow folders."""
+    workflow_dirs = [
+        Path("/mnt/scratch/projects/ComfyUI_Workflows"),
+        Path("/mnt/scratch/vault/ComfyUI_Workflows"),
+        Path("/mnt/scratch/ComfyUI_Workflows"),
+    ]
+
+    workflow_files = []
+    for root in workflow_dirs:
+        if root.exists():
+            workflow_files.extend([p for p in root.glob("*.json") if p.is_file()])
+
+    seen = set()
+    workflows = []
+    for path in sorted(workflow_files):
+        path_str = str(path)
+        if path_str in seen:
+            continue
+        seen.add(path_str)
+        workflows.append({"name": path.stem, "path": path_str})
+
+    if not workflows:
+        return {
+            "status": "empty",
+            "message": "No workflows found in known workflow folders",
+            "searched": [str(p) for p in workflow_dirs],
+        }
+    return {"count": len(workflows), "workflows": workflows}
+
+@mcp.tool()
+def query_vault(query: str, max_results: int = 20) -> dict:
+    """Search the vault for matching text."""
+    vault_root = Path("/mnt/scratch/vault")
+    if not vault_root.exists():
+        return {"status": "error", "message": "Vault not found", "path": str(vault_root)}
+    if not query or not query.strip():
+        return {"status": "error", "message": "Query is empty"}
+
+    rg_path = shutil.which("rg")
+    if rg_path:
+        try:
+            result = subprocess.run(
+                [
+                    rg_path,
+                    "-n",
+                    "-i",
+                    "--max-count",
+                    str(max_results),
+                    "--",
+                    query,
+                    str(vault_root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode in (0, 1):
+                lines = [line for line in result.stdout.splitlines() if line.strip()]
+                matches = []
+                for line in lines:
+                    parts = line.split(":", 2)
+                    if len(parts) != 3:
+                        continue
+                    path, line_no, text = parts
+                    try:
+                        line_no = int(line_no)
+                    except ValueError:
+                        continue
+                    matches.append({"path": path, "line": line_no, "text": text})
+                if not matches:
+                    return {"status": "empty", "count": 0, "matches": []}
+                return {"count": len(matches), "matches": matches}
+            return {"status": "error", "message": result.stderr.strip() or "rg failed"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    matches = []
+    query_lower = query.lower()
+    for path in vault_root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            if path.stat().st_size > 2_000_000:
+                continue
+        except OSError:
+            continue
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as handle:
+                for idx, line in enumerate(handle, start=1):
+                    if query_lower in line.lower():
+                        matches.append(
+                            {"path": str(path), "line": idx, "text": line.rstrip()}
+                        )
+                        if len(matches) >= max_results:
+                            return {"count": len(matches), "matches": matches}
+        except OSError:
+            continue
+
+    if not matches:
+        return {"status": "empty", "count": 0, "matches": []}
+    return {"count": len(matches), "matches": matches}
+
+@mcp.tool()
 def gpu_status() -> dict:
     """Check RTX 3060 VRAM usage via nvidia-smi"""
     try:
-        import subprocess
         result = subprocess.run(
             ['nvidia-smi', '--query-gpu=memory.used,memory.total,utilization.gpu', '--format=csv,noheader,nounits'],
             capture_output=True,
