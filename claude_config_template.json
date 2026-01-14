@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "evolution-studio": {
+      "command": "wsl.exe",
+      "args": [
+        "-d",
+        "Ubuntu",
+        "/mnt/scratch/projects/evolution-studio-mcp/.venv/bin/python",
+        "/mnt/scratch/projects/evolution-studio-mcp/main.py"
+      ]
+    }
+  }
+}
